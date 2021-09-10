@@ -3,17 +3,22 @@ TODO:
 1. Origanize the gui script with classes
 2. SynthDef chain: read the previous one in the bus, add filter, and out
 3. MIDI control: Korg MicroKontrol, map knobs
+
+Issues:
+1. "SynthDef not found" when run Vox_main.new for the first time. But it works if we close the window and run it again.
 */
 
 Vox_main{
 	var modules, src, filter;
 
 	// this is a normal constructor method
-	*new { /* | arga, argb, argc | */    // * indicates this is a class method
+	*new { // * indicates this is a class method
+		/* | arga, argb, argc | */
         ^super.new.init(/*arga, argb, argc*/)
     }
 
-    init { // | arga, argb, argc |
+    init {
+		/* | arga, argb, argc | */
 		modules = [
 			["Audio Source", "Formants"],
 			[Vox_source, Vox_filter]
@@ -40,6 +45,9 @@ Vox_main{
 			400), scroll: true)
 		.front
 		.alwaysOnTop_(true);
+		window.onClose({
+			// TODO: free the synth or stop sounds if window is closed
+		});
 
 		src = Vox_source.new;
 		srcView = src.view;
@@ -54,6 +62,12 @@ Vox_main{
 }
 
 Vox_source{
+	/*
+	TODO:
+	1. Improve volume control scaling to log or exp. (X)
+	  1.1 Use Server.volume? Changes the internal volume setting. May not be good
+	2.
+	*/
 	var <view;
 
 	*new { arg main;
@@ -65,20 +79,20 @@ Vox_source{
 		this.createPanel;
 	}
 
-	*compileSynthDefs { // Or *compileSynthDefs
+	*compileSynthDefs {
 		SynthDef(\Voxsource, {
 			arg outBus=0,
-			note=45, volume=2.0, fv=6.5;
+			note=45, mul=2.0, fv=6.5;
 			var source;
 
-			source = Blip.ar(SinOsc.kr(fv, 0, 0.01, note.midicps), 200, mul:volume);
+			source = Blip.ar(SinOsc.kr(fv, 0, 0.01, note.midicps), 200, mul:mul);
 			Out.ar(outBus, source);
 			};
 		).send(Server.default);
 	}
 
 	createPanel {
-		var synth, title, button, noteBox, noteLabel, volSlider, ezView, text;
+		var synth, title, button, noteBox, noteLabel, volSlider, volLabel, text;
 
 		synth = Synth.new(\Voxsource);
 		view = View()
@@ -93,22 +107,20 @@ Vox_source{
 		.states_([
 			["Mute", Color.black, Color.gray(0.8)],  // value=0
 			["Unmute", Color.white, Color(0.4, 1.0, 0.6)]    // value=1
-		])
-		.action_({
+		]);
+		button.action_({
 			arg obj;
 			if(
 				obj.value == 1,
-				{synth.set(\volume, 0)},
-				{synth.set(\volume, 1)}
+				{synth.set(\mul, 0)},
+				{synth.set(\mul, 1)}
 			);
 		});
 
 		noteLabel = StaticText(view, 60@30).string_("MIDI Note");
-		noteBox = NumberBox(view, 60@30)
-		.clipLo_(21)
-		.clipHi_(108)
-		.step_(1)
-		.action_({
+		noteBox = NumberBox(view, 60@30)   // used to be an EZNumber which is more handy to program,
+		.clipLo_(21).clipHi_(108).step_(1);// but crashes sometimes
+		noteBox.action_({
 			arg obj;
 			var f;
 			f = obj.value;
@@ -116,33 +128,25 @@ Vox_source{
 		})
 		.valueAction_(45);
 
-
-		/*ezView = View(view, 120@30); // contains an EZNumber,
-		//an EZ... object itself can not be included in a layout
-		noteBox = EZNumber(ezView, 120@30,
-			"MIDI Note", [21, 108, \lin, 1.0, 45].asSpec,
-			{|ez| synth.set(\note, ez.value)},
-			45, true, 80, 40);
-		noteBox.setColors(Color.rand,Color.white);*/
-
-		volSlider = Slider(view, 20@80)
-		.value_(0.1)
-		.action_({
+		volLabel = StaticText(view, 20@20).string_("Vol");
+		volSlider = Slider(view, 20@60).value_(0.1);
+		volSlider.action_({
 			arg obj;
-			var vol;
-			vol = (obj.value * 10.0);
-			synth.set(\volume, vol);
+			var m;
+			m = (obj.value.linexp(0,1, 0.1, 10));
+			synth.set(\mul, m);
+			if(obj.value > 0, {button.value_(Mute);});
 		});
 
+		// Layout
 		view.layout = HLayout(
-			[VLayout(
-				[HLayout(title, button)],
-				//[ezView],
+			VLayout(
+				HLayout(title, button),
 				HLayout(noteLabel, noteBox, nil),
 				text,
 				nil
-			)],
-			[volSlider],
+			),
+			VLayout(volLabel, volSlider, nil),
 			nil
 		);
 	}
@@ -183,10 +187,10 @@ Vox_filter{
 		.minSize_(Size(500, 200))
 		.background_(Color.gray.alpha_(0.4));
 
-		/*f1 = Vox_formant.new;
+		f1 = Vox_formant.new;
 		f1View = f1.view;
 
-		view.layout = HLayout(f1View, nil);*/
+		view.layout = HLayout(f1View, nil);
 
 	}
 
@@ -230,21 +234,22 @@ Vox_formant{
 		.minSize_(Size(60, 60))
 		.background_(Color(0.5, 0.5, 1));
 
-		synth = Synth(\Voxformant);
-
 		fLabel = StaticText(view, 60@30).string_("Formant 1");
 		fUnit = StaticText(view, 20@30).string_("Hz");
 		freqBox = NumberBox(view, 40@30)
-		.clipLo_(150)
-		.clipHi_(1000)
+		.clipLo_(150).clipHi_(1000)
 		.step_(0.1)
-		.decimals_(1)
-		.action_({
+		.decimals_(1);
+
+		/*synth = Synth(\Voxformant);
+
+		freq.action_({
 			arg obj;
 			var f;
 			f = obj.value.linexp(0,1,150,1000);
 			synth.set(\freq, f);
-		});
+		});*/
+
 		/* // EZ Number Box: does not show up sometimes
 		freqBox = EZNumber(ezView, 100@30,
 			"Formant", [150, 1000, \exp, 0.1, 150, "Hz"].asSpec,
