@@ -1,6 +1,7 @@
 /*
 TODO:
 1. Origanize the gui script with classes
+  1.1 layout stretch
 2. SynthDef chain: read the previous one in the bus, add filter, and out
 3. MIDI control: Korg MicroKontrol, map knobs
 
@@ -20,7 +21,7 @@ Vox_main{
     init {
 		/* | arga, argb, argc | */
 		modules = [
-			["Audio Source", "Formants"],
+			["Audio Source", "Vocal Tract Formants"],
 			[Vox_source, Vox_filter]
 		];
 		Server.default.waitForBoot({
@@ -55,7 +56,7 @@ Vox_main{
 		filter = Vox_filter.new;
 		filterView = filter.view;
 
-		window.layout = VLayout(HLayout(srcView, nil), filterView, nil);
+		window.layout = VLayout( [HLayout([srcView], [nil])], [filterView], [nil], [nil] );
 		window.layout.margins_(1);
 	}
 
@@ -103,7 +104,7 @@ Vox_source{
 		title = StaticText(view, 80@30).string_("Source sound");
 		text = TextField(view, 80@60).string_("Here: vibrato and stuff.");
 
-		button = Button(view,40@30)
+		button = Button(view,50@30)
 		.states_([
 			["Mute", Color.black, Color.gray(0.8)],  // value=0
 			["Unmute", Color.white, Color(0.4, 1.0, 0.6)]    // value=1
@@ -135,18 +136,18 @@ Vox_source{
 			var m;
 			m = (obj.value.linexp(0,1, 0.1, 10));
 			synth.set(\mul, m);
-			if(obj.value > 0, {button.value_(Mute);});
+			if( (obj.value > 0) && (button.value == 1), { button.value_(0); });
 		});
 
 		// Layout
 		view.layout = HLayout(
 			VLayout(
-				HLayout(title, button),
-				HLayout(noteLabel, noteBox, nil),
+				HLayout([title], [button], [nil]),
+				HLayout([noteLabel], [noteBox], [nil]),
 				text,
 				nil
 			),
-			VLayout(volLabel, volSlider, nil),
+			VLayout([volLabel], [volSlider], [nil]),
 			nil
 		);
 	}
@@ -154,7 +155,7 @@ Vox_source{
 }
 
 Vox_filter{
-	var <view, modules, visibleFormants;
+	var <view, modules, visible, formants, numFormants;
 
 	*new { arg main;
 		^super.new.init(main)
@@ -166,7 +167,7 @@ Vox_filter{
 			[Vox_formant]
 		];
 		this.createPanel;
-		// this.compileSynthDefs;
+		//this.compileSynthDefs;
 	}
 
 	*compileSynthDefs{
@@ -174,24 +175,43 @@ Vox_filter{
 	}
 
 	createPanel{
-		var reLayout,
-		f1, f1View;
+		var reLayoutAdd, reLayoutRemove,
+		newButton, removeButton, fView, f1, f1View;
 
-		/*reLayout{
+		reLayoutAdd = {
 			// renew the synth once a new formant is enabled
-			visibleFormants = [];
+			// formants = [];
+			"test ReLayoutAdd function".postln;
+		};
 
-		};*/
+		reLayoutRemove = {
+			// renew the synth once a formant is removed
+			"test ReLayoutRemove function".postln;
+		};
 
 		view = View()
-		.minSize_(Size(500, 200))
-		.background_(Color.gray.alpha_(0.4));
+		.minSize_(Size(400, 200));
+		//.background_(Color.gray.alpha_(0.4));
+
+		newButton = Button(view, 20@20) // add a new formant
+		.states_( [ ["+", Color.red, Color.gray(0.8)] ] );
+		newButton.mouseDownAction_({
+			reLayoutAdd.();
+		});
+		removeButton = Button(view, 20@20) // remove a formant
+		.states_( [ ["-", Color.black, Color.gray(0.8)] ] );
+		removeButton.mouseDownAction_({
+			reLayoutRemove.();
+		});
 
 		f1 = Vox_formant.new;
 		f1View = f1.view;
 
-		view.layout = HLayout(f1View, nil);
-
+		view.layout = HLayout(
+			[f1View],
+			[VLayout( [newButton], [removeButton], [nil] )],
+			[nil]
+		);
 	}
 
 }
@@ -231,10 +251,10 @@ Vox_formant{
 		var synth, fLabel, fUnit, freqBox;
 
 		view = View()
-		.minSize_(Size(60, 60))
-		.background_(Color(0.5, 0.5, 1));
+		.minSize_(Size(40, 60))
+		.background_(Color(0.5, 0.5, 1)); // blueish
 
-		fLabel = StaticText(view, 60@30).string_("Formant 1");
+		fLabel = StaticText(view, 40@30).string_("Formant 1");
 		fUnit = StaticText(view, 20@30).string_("Hz");
 		freqBox = NumberBox(view, 40@30)
 		.clipLo_(150).clipHi_(1000)
