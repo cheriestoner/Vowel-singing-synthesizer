@@ -2,11 +2,11 @@
 TODO:
 1. Origanize the gui script with classes (x)
   1.1 layout stretch
-2. Synth chain: read the previous one in the bus, add filter, and out
+2. Synth chain: read the previous one in the bus, add filter, and out (x)
   2.1 SynthDefs are predefined so that we can call one anytime to create a Synth.
   2.2 The chain consists of Synths and should be created in the right order.
   2.3 Use Array to save and control different Synths separately.
-3. MIDI control: Korg MicroKontrol, map knobs
+3. MIDI control: Korg microKontrol, map knobs
 
 Issues:
 1. "SynthDef not found" when run Gui_main.new for the first time. But it works if we close the window and run it again.    Is it because synth is created before synthdef is compiled (x)
@@ -51,7 +51,7 @@ Gui_main{
 		.front
 		.alwaysOnTop_(true);
 		window.onClose({
-			// todo: free the synth or stop sounds if window is closed
+			// todo: something
 		});
 
 		src = Gui_source.new;
@@ -86,10 +86,12 @@ Gui_source{
 	*compileSynthDefs {
 		SynthDef(\Voxsource, {
 			arg outBus=0,
-			note=45, mul=1.0, fv=6.5;
+			note=45, mul=10.0, fv=6.5;
 			var source;
-			source = ApexSource01.ar(SinOsc.kr(6.5, 0, 0.01, 110), mult:mul);
+			source = ApexSource01.ar(SinOsc.kr(fv, 0, 0.01, note.midicps), mult:mul);
 			// source = Blip.ar(SinOsc.kr(fv, 0, 0.01, note.midicps), 200, mul:mul);
+			// source = SoundIn.ar(0);
+
 			Out.ar(outBus, source);
 			};
 		).send(Server.default);
@@ -98,12 +100,17 @@ Gui_source{
 	createPanel {
 		var synth, title, button, noteBox, noteLabel, volSlider, volLabel, text;
 
-		synth = Synth.new(\Voxsource);
+		synth = Synth.new(\Voxsource, [\outBus, 0]);
 		view = View()
 		.background_(Color.gray.alpha_(0.3))
 		.minSize_(Size(150, 80));
 		// .resize_(5);
 		// synth.inspect;
+		// Free synth when view is destroyed
+		view.onClose_({
+			synth.free;
+			this.free;
+		});
 
 		// Source gui
 		title = StaticText(view, 80@30).string_("Source sound");
@@ -119,7 +126,7 @@ Gui_source{
 			if(
 				obj.value == 1,
 				{synth.set(\mul, 0)},
-				{synth.set(\mul, 1)}
+				{synth.set(\mul, 10)}
 			);
 		});
 
@@ -139,7 +146,7 @@ Gui_source{
 		volSlider.action_({
 			arg obj;
 			var m;
-			m = (obj.value.linexp(0, 1, 0.1, 20));
+			m = (obj.value.linexp(0, 1, 10, 30));
 			synth.set(\mul, m);
 			if( (obj.value > 0) && (button.value == 1), { button.value_(0); });
 		});
@@ -165,7 +172,7 @@ Gui_filter{
 	1. gui: add/remove filter panels
 	2. implement formant chain here
 	*/
-	var <view, formantViews, synths, freqs, freqLos, freqHis, qs;
+	var <view, formantViews, synths, freqs, freqLos, freqHis, invQs/*reciprocal of Q*/;
 
 	*new { arg main;
 		^super.new.init(main)
@@ -182,11 +189,11 @@ Gui_filter{
 			res=0.1, low=0.1, band=0.0, high=0.0, notch=0.0, peak=0.0; //levels
 			var signal;
 
-			signal = In.ar(inBus, 1);  // intend to get the signal from inBus
+			signal = In.ar(inBus, 1)*0.1;  // intend to get the signal from inBus
 			signal = SVF.ar(signal,    // add a filter
 				freq, // cutoff freq
-				res, // q^-1
-				low, band, high, notch, peak, mul: 1);
+				res, // mysterious factor :-\
+				low, band, high, notch, peak, mul: 5);
 			ReplaceOut.ar(outBus, signal);
 		};
 		).send(Server.default);
@@ -206,7 +213,6 @@ Gui_filter{
 			reView.removeAll;
 			reView.layout = HLayout(*formantViews); // an array of sub-views
 			reView.refresh;
-			// ("test ReLayoutAdd function. num formants"+numFormants+"\n").postln;
 		};
 
 		reLayoutRemove = {
@@ -218,18 +224,23 @@ Gui_filter{
 			reView.removeAll;
 			reView.layout = HLayout(*formantViews); // an array of sub-views
 			reView.refresh;
-			// "test ReLayoutRemove function\n".postln;
 		};
 
 		// Initials
 		numFormants = 0;
 		synths = [];
-		view = View().minSize_(Size(400, 200));
-		reView = View();
 		freqs = [500, 1000, 2400, 4000];
 		freqLos = [150, 300];
 		freqHis = [1000, 2400];
-		qs = Array.fill(5, 0.1);
+		invQs = Array.fill(5, 0.1);
+		// view
+		view = View().minSize_(Size(400, 200));
+		reView = View();
+		// free synths when view is destroyed
+		view.onClose_({
+			synths.do({|si, i| si.free;});
+			this.free;
+		});
 
 		// Buttons
 		newButton = Button(view, 20@20) // add a new formant
@@ -237,11 +248,11 @@ Gui_filter{
 		newButton.mouseDownAction_({
 			var synth, freq, res; // create synth
 			if( freqs[numFormants] == nil,
-				{freq = 5000},
-				{freq = freqs[numFormants]}
+				{freq = 5000; res=0.6;},
+				{freq = freqs[numFormants]; res=pow(1-4*invQs[numFormants], 4);}
 			);
 			// create a new formant and add the synth into the chain
-			synth = Synth(\Voxformant, [\freq, freq, \res, res], addAction: \addToTail);
+			synth = Synth(\Voxformant, [\inBus, 0, \freq, freq, \res, res], addAction: \addToTail);
 			synths = synths.add(synth);
 			numFormants = numFormants + 1;
 			reLayoutAdd.();
@@ -260,19 +271,21 @@ Gui_filter{
 		// Levels
 		lowLabel = StaticText(levelView, 20@20).string_("Low");
 		notchLabel = StaticText(levelView, 20@20).string_("Notch");
-		lowKnob = Knob(levelView, 20@20);
-		notchKnob = Knob(levelView, 20@20);
+		lowKnob = Knob(levelView, 20@20).value_(0.1);
+		notchKnob = Knob(levelView, 20@20).value_(0.0);
 		lowKnob.action_({
 			arg obj;
 			var lv;
 			lv = obj.value;
-			synths.do( {|s, i| s.set(\low, lv)} )
+			postf("low %.\n", lv);
+			synths.do( {|si, i| si.set(\low, lv)} )
 		});
 		notchKnob.action_({
 			arg obj;
 			var lv;
 			lv = obj.value;
-			synths.do( {|s, i| s.set(\notch, lv)} )
+			postf("notch %.\n", lv);
+			synths.do( {|si, i| si.set(\notch, lv)} )
 		});
 
 		// Layout
@@ -295,7 +308,7 @@ Gui_filter{
 
 	createSubPanel{ arg i;/*, rangeLo, rangeHi;*/
 		var subView, synth,
-		fLabel, fUnit, freqBox, qLabel, qBox;
+		fLabel, fUnit, freqBox, resLabel, resBox, qValue, qLabel, qBox;
 
 		subView = View()
 		.minSize_(Size(40, 60))
@@ -306,8 +319,11 @@ Gui_filter{
 		fUnit = StaticText(subView, 20@30).string_("Hz");
 		freqBox = NumberBox(subView, 40@30).step_(0.1).decimals_(1);
 		if(freqs[i] != nil, {freqBox.value_(freqs[i])});
-		qLabel = StaticText(subView, 40@30).string_("Q factor");
-		qBox = NumberBox(subView, 40@30).value_(10).clipLo_(1).step_(1);
+		resLabel = StaticText(subView, 40@30).string_("Resonance");
+		resBox = NumberBox(subView, 40@30).value_(0.1).clipLo_(0).clipHi_(1).step_(0.01);
+		// qValue = StaticText(subView, 40@30).string_("Q factor" + 0.25*1/(1-pow(resBox.value, 0.25)));
+		/*qLabel = StaticText(subView, 40@30).string_("Q");
+		qBox = NumberBox(subView, 40@30).value_(1.0).clipLo_(0.1).step_(0.1);*/
 
 		// Gui actions
 		freqBox.action_({
@@ -321,21 +337,28 @@ Gui_filter{
 			synths[i].set(\freq, f);
 			postf("changing f% freq\n", i+1);
 		});
-		qBox.action_({
+		resBox.action_({
 			arg obj;
-			var q;
-			q = (1/obj.value).postln;
-			qs[i] = q;
-			synths[i].set(\res, q);
-			postf("changing f% q factor\n", i+1);
+			var res;
+			res = (obj.value).postln;
+			// invQs[i] = res;
+			synths[i].set(\res, res);
+			postf("changing f% res \n", i+1);
 		});
+		/*qBox.action_({
+			arg obj;
+			var res;
+			invQs[i] = 1/obj.value;
+			res = pow(1-4*obj.value, 4);
+			synths[i].set(\res, res);
+		});*/
 
 		// Layout
 		subView.layout = VLayout(
 			[fLabel],
 			[HLayout( [freqBox], [fUnit], [nil] )],
-			[qLabel],
-			[qBox],
+			[resLabel], [resBox],
+			// [qLabel], [qBox],
 			[nil]
 		);
 
