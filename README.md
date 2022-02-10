@@ -1,4 +1,4 @@
-# VowelSynthesizer
+# Vowel Singing Synthesizer
 
 DT2217 Individual project. Supervisor: Sten Ternström. KTH TMH.
 
