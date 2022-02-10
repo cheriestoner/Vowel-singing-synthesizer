@@ -6,4 +6,6 @@ DT2217 Individual project. Supervisor: Sten Ternström. KTH TMH.
 
 [**Project Report**](https://www.overleaf.com/read/psrtccwjnbcb)
 
-**Usage** Run `Gui_main.new`
+**Usage**
+
+Run `Gui_main.new`
